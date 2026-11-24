@@ -197,3 +197,23 @@ export async function getIconSvg(
 export function getCachedIconSvg(name: string, options: IconRenderOptions): string | undefined {
   return svgCache.get(cacheKey(name, options));
 }
+
+export async function getIconJsx(
+  name: string,
+  options: IconRenderOptions,
+  signal?: AbortSignal,
+): Promise<string> {
+  return callMcpTool<string>(
+    'get_icon',
+    {
+      name,
+      format: 'jsx',
+      style: options.style,
+      size: options.size,
+      stroke: options.stroke,
+      radius: options.radius,
+      color: options.color,
+    },
+    signal,
+  );
+}

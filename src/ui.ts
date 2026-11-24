@@ -1,6 +1,7 @@
 import './styles.css';
 import {
   getCachedIconSvg,
+  getIconJsx,
   getIconSvg,
   getSetIcons,
   listSets,
@@ -12,7 +13,7 @@ import {
   type IconStyle,
 } from './mcp';
 
-const DEFAULT_HINT = 'Click or drag \u00b7 Right-click to copy';
+const DEFAULT_HINT = 'Click or drag \u00b7 Right-click for menu';
 const RECENT_SET_ID = '__recent__';
 const PAGE_SIZE = 60;
 const SEARCH_LIMIT = 48;
@@ -85,6 +86,10 @@ const styleButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.s
 const toggleComponentBtn = document.getElementById('toggle-component') as HTMLButtonElement;
 const toggleReplaceBtn = document.getElementById('toggle-replace') as HTMLButtonElement;
 const resizeHandle = document.getElementById('resize-handle') as HTMLDivElement;
+const gridScroll = document.getElementById('grid-scroll') as HTMLElement;
+const contextMenu = document.getElementById('context-menu') as HTMLDivElement;
+
+let contextTargetItem: IconItem | null = null;
 
 function postToPlugin(msg: unknown): void {
   parent.postMessage({ pluginMessage: msg }, '*');
@@ -248,6 +253,22 @@ function applySvgToTile(tile: HTMLButtonElement, rawSvg: string): void {
   tile.innerHTML = normalizeSvgColor(rawSvg, state.options.color);
 }
 
+function applyLiveStyleToGrid(): void {
+  const strokeWidth = Number(((state.options.stroke * 16) / state.options.size).toFixed(3));
+  const color = state.options.color;
+
+  const svgs = iconGrid.querySelectorAll<SVGSVGElement>('svg');
+  for (const svg of svgs) {
+    svg.setAttribute('stroke-width', String(strokeWidth));
+    svg.setAttribute('stroke', color);
+    svg.setAttribute('color', color);
+    const tinted = svg.querySelectorAll<SVGElement>('[fill-opacity]');
+    for (const el of tinted) {
+      el.setAttribute('fill', color);
+    }
+  }
+}
+
 async function resolveFinalSvg(name: string): Promise<string> {
   const rawSvg =
     getCachedIconSvg(name, state.options) ??
@@ -255,13 +276,13 @@ async function resolveFinalSvg(name: string): Promise<string> {
   return normalizeSvgColor(rawSvg, state.options.color);
 }
 
-async function copySvgToClipboard(name: string, svg: string): Promise<void> {
+async function copyTextToClipboard(text: string, successMessage: string): Promise<void> {
   try {
-    await navigator.clipboard.writeText(svg);
-    postToPlugin({ type: 'notify', message: `Copied "${name}" SVG` });
+    await navigator.clipboard.writeText(text);
+    postToPlugin({ type: 'notify', message: successMessage });
   } catch {
     const ta = document.createElement('textarea');
-    ta.value = svg;
+    ta.value = text;
     ta.style.position = 'fixed';
     ta.style.opacity = '0';
     document.body.appendChild(ta);
@@ -270,10 +291,26 @@ async function copySvgToClipboard(name: string, svg: string): Promise<void> {
     ta.remove();
     postToPlugin({
       type: 'notify',
-      message: ok ? `Copied "${name}" SVG` : 'Could not copy SVG',
+      message: ok ? successMessage : 'Could not copy to clipboard',
       error: !ok,
     });
   }
+}
+
+function openContextMenu(item: IconItem, clientX: number, clientY: number): void {
+  contextTargetItem = item;
+  contextMenu.hidden = false;
+  const menuW = contextMenu.offsetWidth || 152;
+  const menuH = contextMenu.offsetHeight || 96;
+  const x = Math.min(clientX, window.innerWidth - menuW - 6);
+  const y = Math.min(clientY, window.innerHeight - menuH - 6);
+  contextMenu.style.left = `${Math.max(4, x)}px`;
+  contextMenu.style.top = `${Math.max(4, y)}px`;
+}
+
+function closeContextMenu(): void {
+  contextMenu.hidden = true;
+  contextTargetItem = null;
 }
 
 function createIconTile(item: IconItem): HTMLButtonElement {
@@ -356,15 +393,9 @@ function createIconTile(item: IconItem): HTMLButtonElement {
     }
   });
 
-  tile.addEventListener('contextmenu', async (e) => {
+  tile.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    try {
-      const finalSvg = await resolveFinalSvg(item.name);
-      await copySvgToClipboard(item.name, finalSvg);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      postToPlugin({ type: 'notify', message: `Error: ${message}`, error: true });
-    }
+    openContextMenu(item, e.clientX, e.clientY);
   });
 
   return tile;
@@ -581,6 +612,15 @@ function bindEvents(): void {
     }
   });
 
+  gridScroll.addEventListener('scroll', () => {
+    if (state.isLoading || state.nextOffset === null) return;
+    const distanceToBottom =
+      gridScroll.scrollHeight - gridScroll.scrollTop - gridScroll.clientHeight;
+    if (distanceToBottom < 140) {
+      void loadCurrentView(true);
+    }
+  });
+
   for (const btn of styleButtons) {
     btn.addEventListener('click', () => {
       const nextStyle = btn.dataset.style as IconStyle;
@@ -595,13 +635,15 @@ function bindEvents(): void {
 
   sizeSelect.addEventListener('change', () => {
     state.options.size = Number(sizeSelect.value) || 24;
-    scheduleOptionsReload();
+    saveSettings();
+    applyLiveStyleToGrid();
   });
 
   colorPicker.addEventListener('input', () => {
     state.options.color = colorPicker.value;
     colorHex.value = colorPicker.value;
-    scheduleOptionsReload();
+    saveSettings();
+    applyLiveStyleToGrid();
   });
 
   colorHex.addEventListener('input', () => {
@@ -609,7 +651,8 @@ function bindEvents(): void {
     if (/^#[0-9a-fA-F]{6}$/.test(val)) {
       state.options.color = val;
       colorPicker.value = val;
-      scheduleOptionsReload();
+      saveSettings();
+      applyLiveStyleToGrid();
     }
   });
 
@@ -617,7 +660,8 @@ function bindEvents(): void {
     const val = Number(strokeRange.value);
     state.options.stroke = val;
     strokeVal.textContent = String(val);
-    scheduleOptionsReload();
+    saveSettings();
+    applyLiveStyleToGrid();
   });
 
   radiusRange.addEventListener('input', () => {
@@ -625,6 +669,50 @@ function bindEvents(): void {
     state.options.radius = val;
     radiusVal.textContent = String(val);
     scheduleOptionsReload();
+  });
+
+  contextMenu.addEventListener('click', async (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.ctx-item');
+    const item = contextTargetItem;
+    closeContextMenu();
+    if (!btn || !item) return;
+
+    const action = btn.dataset.action;
+    try {
+      if (action === 'insert') {
+        const finalSvg = await resolveFinalSvg(item.name);
+        postToPlugin({
+          type: 'insert-icon',
+          name: item.name,
+          label: item.label,
+          svg: finalSvg,
+          size: state.options.size,
+          asComponent: state.asComponent,
+          replaceSelected: state.replaceSelected,
+        });
+      } else if (action === 'copy-svg') {
+        const finalSvg = await resolveFinalSvg(item.name);
+        await copyTextToClipboard(finalSvg, `Copied "${item.name}" SVG`);
+      } else if (action === 'copy-jsx') {
+        const jsx = await getIconJsx(item.name, state.options);
+        await copyTextToClipboard(jsx, `Copied "${item.name}" JSX`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      postToPlugin({ type: 'notify', message: `Error: ${message}`, error: true });
+    }
+  });
+
+  document.addEventListener('pointerdown', (e) => {
+    if (!contextMenu.hidden && !contextMenu.contains(e.target as Node)) {
+      closeContextMenu();
+    }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !contextMenu.hidden) {
+      closeContextMenu();
+    }
   });
 
   toggleComponentBtn.addEventListener('click', () => {
