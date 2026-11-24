@@ -39,10 +39,17 @@
       </header>
 
       <main id="grid-scroll" class="grid-scroll">
+        <div id="request-banner" class="request-banner" hidden>
+          <span id="request-banner-text">Not what you need?</span>
+          <button id="request-banner-btn" class="banner-btn" type="button">Request icon</button>
+        </div>
         <div id="icon-grid" class="icon-grid"></div>
         <div id="empty-state" class="empty-state" hidden>
           <p id="empty-title" class="empty-title">No icons found</p>
           <p id="empty-subtitle" class="empty-subtitle">Try different words or switch the set.</p>
+          <button id="empty-request-btn" class="load-more-btn empty-action" type="button" hidden>
+            Request this icon from IconMCP
+          </button>
         </div>
         <div id="load-more-wrap" class="load-more-wrap" hidden>
           <button id="load-more-btn" class="load-more-btn" type="button">Load more</button>
@@ -94,6 +101,9 @@
             <span class="mode-dot"></span>
             Replace selected
           </button>
+          <button id="open-request-btn" class="mode-pill mode-pill-right" type="button" title="Ask IconMCP agents to draw a new icon">
+            + Request
+          </button>
         </div>
 
         <div id="resize-handle" class="resize-handle" title="Drag to resize"></div>
@@ -104,6 +114,59 @@
       <button type="button" class="ctx-item" data-action="insert">Insert into Figma</button>
       <button type="button" class="ctx-item" data-action="copy-svg">Copy SVG</button>
       <button type="button" class="ctx-item" data-action="copy-jsx">Copy React (JSX)</button>
+      <div class="ctx-sep"></div>
+      <button type="button" class="ctx-item ctx-danger" data-action="report">Report issue...</button>
+    </div>
+
+    <div id="request-modal" class="modal-backdrop" hidden>
+      <form id="request-form" class="modal-card">
+        <div class="modal-head">
+          <strong>Request new icon</strong>
+          <button type="button" class="modal-close" data-close="request-modal">&times;</button>
+        </div>
+        <label class="modal-field">
+          <span>Icon name (max 60 chars)</span>
+          <input id="req-name" type="text" maxlength="60" required placeholder="e.g. ice cream scoop" />
+        </label>
+        <label class="modal-field">
+          <span>What is it for? (optional, max 140 chars)</span>
+          <input id="req-why" type="text" maxlength="140" placeholder="e.g. a dessert menu" />
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn-sec" data-close="request-modal">Cancel</button>
+          <button id="req-submit" type="submit" class="btn-primary">Send request</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="report-modal" class="modal-backdrop" hidden>
+      <form id="report-form" class="modal-card">
+        <div class="modal-head">
+          <strong>Report icon issue</strong>
+          <button type="button" class="modal-close" data-close="report-modal">&times;</button>
+        </div>
+        <div class="modal-badge">Icon: <code id="rep-icon-name"></code></div>
+        <label class="modal-field">
+          <span>Reason</span>
+          <select id="rep-reason">
+            <option value="meaning">Doesn't match meaning</option>
+            <option value="broken">Broken / rendering glitch</option>
+            <option value="name">Wrong or confusing name</option>
+            <option value="style">Off-style for library</option>
+            <option value="similar">Duplicate / too similar</option>
+            <option value="inappropriate">Inappropriate</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label id="rep-note-wrap" class="modal-field" hidden>
+          <span>Details (max 140 chars)</span>
+          <input id="rep-note" type="text" maxlength="140" placeholder="Describe what is wrong" />
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn-sec" data-close="report-modal">Cancel</button>
+          <button id="rep-submit" type="submit" class="btn-primary">Submit report</button>
+        </div>
+      </form>
     </div>
     <!--INLINE_JS-->
   </body>

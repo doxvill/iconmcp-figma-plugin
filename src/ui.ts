@@ -6,11 +6,14 @@ import {
   getSetIcons,
   listSets,
   normalizeSvgColor,
+  reportIcon,
+  requestIcon,
   searchIcons,
   type IconItem,
   type IconRenderOptions,
   type IconSetInfo,
   type IconStyle,
+  type ReportReason,
 } from './mcp';
 
 const DEFAULT_HINT = 'Click or drag \u00b7 Right-click for menu';
@@ -88,8 +91,26 @@ const toggleReplaceBtn = document.getElementById('toggle-replace') as HTMLButton
 const resizeHandle = document.getElementById('resize-handle') as HTMLDivElement;
 const gridScroll = document.getElementById('grid-scroll') as HTMLElement;
 const contextMenu = document.getElementById('context-menu') as HTMLDivElement;
+const requestBanner = document.getElementById('request-banner') as HTMLDivElement;
+const requestBannerText = document.getElementById('request-banner-text') as HTMLSpanElement;
+const requestBannerBtn = document.getElementById('request-banner-btn') as HTMLButtonElement;
+const emptyRequestBtn = document.getElementById('empty-request-btn') as HTMLButtonElement;
+const openRequestBtn = document.getElementById('open-request-btn') as HTMLButtonElement;
+const requestModal = document.getElementById('request-modal') as HTMLDivElement;
+const requestForm = document.getElementById('request-form') as HTMLFormElement;
+const reqNameInput = document.getElementById('req-name') as HTMLInputElement;
+const reqWhyInput = document.getElementById('req-why') as HTMLInputElement;
+const reqSubmitBtn = document.getElementById('req-submit') as HTMLButtonElement;
+const reportModal = document.getElementById('report-modal') as HTMLDivElement;
+const reportForm = document.getElementById('report-form') as HTMLFormElement;
+const repIconNameEl = document.getElementById('rep-icon-name') as HTMLElement;
+const repReasonSelect = document.getElementById('rep-reason') as HTMLSelectElement;
+const repNoteWrap = document.getElementById('rep-note-wrap') as HTMLLabelElement;
+const repNoteInput = document.getElementById('rep-note') as HTMLInputElement;
+const repSubmitBtn = document.getElementById('rep-submit') as HTMLButtonElement;
 
 let contextTargetItem: IconItem | null = null;
+let reportTargetIconName = '';
 
 function postToPlugin(msg: unknown): void {
   parent.postMessage({ pluginMessage: msg }, '*');
@@ -139,14 +160,37 @@ function setStatus(text: string): void {
   statusText.textContent = text;
 }
 
-function showEmpty(title: string, subtitle: string): void {
+function showEmpty(title: string, subtitle: string, allowRequest = false): void {
   emptyTitle.textContent = title;
   emptySubtitle.textContent = subtitle;
+  emptyRequestBtn.hidden = !allowRequest;
   emptyState.hidden = false;
 }
 
 function hideEmpty(): void {
   emptyState.hidden = true;
+  emptyRequestBtn.hidden = true;
+}
+
+function openRequestModal(prefill = ''): void {
+  reqNameInput.value = prefill.slice(0, 60);
+  reqWhyInput.value = '';
+  reqSubmitBtn.disabled = false;
+  reqSubmitBtn.textContent = 'Send request';
+  requestModal.hidden = false;
+  reqNameInput.focus();
+}
+
+function openReportModal(iconName: string): void {
+  reportTargetIconName = iconName;
+  repIconNameEl.textContent = iconName;
+  repReasonSelect.value = 'meaning';
+  repNoteInput.value = '';
+  repNoteWrap.hidden = true;
+  repSubmitBtn.disabled = false;
+  repSubmitBtn.textContent = 'Submit report';
+  reportModal.hidden = false;
+  repReasonSelect.focus();
 }
 
 function populateSetsDropdown(sets: IconSetInfo[]): void {
@@ -479,9 +523,17 @@ async function loadCurrentView(append = false): Promise<void> {
 
       if (state.items.length === 0) {
         iconGrid.innerHTML = '';
-        showEmpty('No icons found', 'Try different keywords or switch to "All sets".');
+        requestBanner.hidden = true;
+        showEmpty('No icons found', 'Try different keywords or ask IconMCP agents to draw it.', true);
         setStatus('0 results');
         return;
+      }
+
+      if (res.weak) {
+        requestBannerText.textContent = `No exact match for "${query}"`;
+        requestBanner.hidden = false;
+      } else {
+        requestBanner.hidden = true;
       }
 
       const tiles = renderGrid(state.items, false);
@@ -491,6 +543,8 @@ async function loadCurrentView(append = false): Promise<void> {
       void hydrateIconsSvgs(state.items, tiles, signal);
       return;
     }
+
+    requestBanner.hidden = true;
 
     // Recent view
     if (state.selectedSetId === RECENT_SET_ID) {
@@ -696,10 +750,78 @@ function bindEvents(): void {
       } else if (action === 'copy-jsx') {
         const jsx = await getIconJsx(item.name, state.options);
         await copyTextToClipboard(jsx, `Copied "${item.name}" JSX`);
+      } else if (action === 'report') {
+        openReportModal(item.name);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       postToPlugin({ type: 'notify', message: `Error: ${message}`, error: true });
+    }
+  });
+
+  openRequestBtn.addEventListener('click', () => {
+    openRequestModal(state.query.trim());
+  });
+
+  requestBannerBtn.addEventListener('click', () => {
+    openRequestModal(state.query.trim());
+  });
+
+  emptyRequestBtn.addEventListener('click', () => {
+    openRequestModal(state.query.trim());
+  });
+
+  repReasonSelect.addEventListener('change', () => {
+    repNoteWrap.hidden = repReasonSelect.value !== 'other';
+  });
+
+  for (const el of document.querySelectorAll<HTMLElement>('[data-close]')) {
+    el.addEventListener('click', () => {
+      const targetId = el.dataset.close;
+      if (targetId === 'request-modal') requestModal.hidden = true;
+      if (targetId === 'report-modal') reportModal.hidden = true;
+    });
+  }
+
+  for (const backdrop of [requestModal, reportModal]) {
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) backdrop.hidden = true;
+    });
+  }
+
+  requestForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = reqNameInput.value.trim();
+    if (!name) return;
+    reqSubmitBtn.disabled = true;
+    reqSubmitBtn.textContent = 'Sending...';
+    try {
+      await requestIcon(name, reqWhyInput.value.trim());
+      requestModal.hidden = true;
+      postToPlugin({ type: 'notify', message: `Requested "${name}" from IconMCP` });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      postToPlugin({ type: 'notify', message: `Request failed: ${message}`, error: true });
+      reqSubmitBtn.disabled = false;
+      reqSubmitBtn.textContent = 'Send request';
+    }
+  });
+
+  reportForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!reportTargetIconName) return;
+    const reason = repReasonSelect.value as ReportReason;
+    repSubmitBtn.disabled = true;
+    repSubmitBtn.textContent = 'Sending...';
+    try {
+      await reportIcon(reportTargetIconName, reason, repNoteInput.value.trim());
+      reportModal.hidden = true;
+      postToPlugin({ type: 'notify', message: `Reported "${reportTargetIconName}"` });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      postToPlugin({ type: 'notify', message: `Report failed: ${message}`, error: true });
+      repSubmitBtn.disabled = false;
+      repSubmitBtn.textContent = 'Submit report';
     }
   });
 

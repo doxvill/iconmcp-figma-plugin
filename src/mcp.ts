@@ -217,3 +217,37 @@ export async function getIconJsx(
     signal,
   );
 }
+
+export type ReportReason =
+  | 'meaning'
+  | 'name'
+  | 'broken'
+  | 'similar'
+  | 'style'
+  | 'inappropriate'
+  | 'other';
+
+export async function requestIcon(
+  name: string,
+  why?: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const args: Record<string, unknown> = { name: name.trim().slice(0, 60) };
+  if (why && why.trim().length > 0) {
+    args.why = why.trim().slice(0, 140);
+  }
+  return callMcpTool<string>('request_icon', args, signal);
+}
+
+export async function reportIcon(
+  icon: string,
+  reason: ReportReason,
+  note?: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const args: Record<string, unknown> = { icon, reason };
+  if (reason === 'other' && note && note.trim().length > 0) {
+    args.note = note.trim().slice(0, 140);
+  }
+  return callMcpTool<string>('report_icon', args, signal);
+}
