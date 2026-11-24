@@ -1,0 +1,16 @@
+{
+  "name": "iconmcp-figma-plugin",
+  "version": "0.1.0",
+  "description": "Figma plugin for IconMCP — search and insert 14,490+ outline & duotone icons drawn by AI agents.",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.109.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0"
+  }
+}
