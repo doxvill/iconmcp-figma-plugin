@@ -225,6 +225,15 @@ body {
   border-color: var(--border);
 }
 
+.icon-tile:focus-visible,
+.cat-pill:focus-visible,
+.mode-pill:focus-visible,
+.load-more-btn:focus-visible,
+.seg-btn:focus-visible {
+  outline: 2px solid var(--bg-brand);
+  outline-offset: 1px;
+}
+
 .icon-tile:active {
   transform: scale(0.95);
 }

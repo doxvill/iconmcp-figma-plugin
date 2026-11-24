@@ -95,6 +95,7 @@ const requestBanner = document.getElementById('request-banner') as HTMLDivElemen
 const requestBannerText = document.getElementById('request-banner-text') as HTMLSpanElement;
 const requestBannerBtn = document.getElementById('request-banner-btn') as HTMLButtonElement;
 const emptyRequestBtn = document.getElementById('empty-request-btn') as HTMLButtonElement;
+const emptyRetryBtn = document.getElementById('empty-retry-btn') as HTMLButtonElement;
 const openRequestBtn = document.getElementById('open-request-btn') as HTMLButtonElement;
 const requestModal = document.getElementById('request-modal') as HTMLDivElement;
 const requestForm = document.getElementById('request-form') as HTMLFormElement;
@@ -160,16 +161,22 @@ function setStatus(text: string): void {
   statusText.textContent = text;
 }
 
-function showEmpty(title: string, subtitle: string, allowRequest = false): void {
+function showEmpty(
+  title: string,
+  subtitle: string,
+  opts: { allowRequest?: boolean; allowRetry?: boolean } = {},
+): void {
   emptyTitle.textContent = title;
   emptySubtitle.textContent = subtitle;
-  emptyRequestBtn.hidden = !allowRequest;
+  emptyRequestBtn.hidden = !opts.allowRequest;
+  emptyRetryBtn.hidden = !opts.allowRetry;
   emptyState.hidden = false;
 }
 
 function hideEmpty(): void {
   emptyState.hidden = true;
   emptyRequestBtn.hidden = true;
+  emptyRetryBtn.hidden = true;
 }
 
 function openRequestModal(prefill = ''): void {
@@ -524,7 +531,9 @@ async function loadCurrentView(append = false): Promise<void> {
       if (state.items.length === 0) {
         iconGrid.innerHTML = '';
         requestBanner.hidden = true;
-        showEmpty('No icons found', 'Try different keywords or ask IconMCP agents to draw it.', true);
+        showEmpty('No icons found', 'Try different keywords or ask IconMCP agents to draw it.', {
+          allowRequest: true,
+        });
         setStatus('0 results');
         return;
       }
@@ -613,7 +622,7 @@ async function loadCurrentView(append = false): Promise<void> {
     setStatus('Connection error');
     if (!append) {
       iconGrid.innerHTML = '';
-      showEmpty('Could not reach IconMCP', message);
+      showEmpty('Could not reach IconMCP', message, { allowRetry: true });
     }
   } finally {
     if (!signal.aborted) {
@@ -832,8 +841,48 @@ function bindEvents(): void {
   });
 
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !contextMenu.hidden) {
-      closeContextMenu();
+    if (e.key === 'Escape') {
+      if (!contextMenu.hidden) closeContextMenu();
+      if (!requestModal.hidden) requestModal.hidden = true;
+      if (!reportModal.hidden) reportModal.hidden = true;
+    }
+  });
+
+  iconGrid.addEventListener('keydown', (e) => {
+    if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp'].includes(e.key)) return;
+    const active = document.activeElement as HTMLElement | null;
+    if (!active || !active.classList.contains('icon-tile')) return;
+
+    const tiles = Array.from(iconGrid.querySelectorAll<HTMLButtonElement>('.icon-tile'));
+    const idx = tiles.indexOf(active as HTMLButtonElement);
+    if (idx === -1) return;
+
+    e.preventDefault();
+    const cols = Math.max(1, getComputedStyle(iconGrid).gridTemplateColumns.split(' ').length);
+    let nextIdx = idx;
+    if (e.key === 'ArrowRight') nextIdx = Math.min(tiles.length - 1, idx + 1);
+    else if (e.key === 'ArrowLeft') nextIdx = Math.max(0, idx - 1);
+    else if (e.key === 'ArrowDown') nextIdx = Math.min(tiles.length - 1, idx + cols);
+    else if (e.key === 'ArrowUp') nextIdx = Math.max(0, idx - cols);
+
+    tiles[nextIdx]?.focus();
+  });
+
+  emptyRetryBtn.addEventListener('click', () => {
+    if (state.sets.length === 0) {
+      void loadSetsAndStart();
+    } else {
+      void loadCurrentView(false);
+    }
+  });
+
+  window.addEventListener('online', () => {
+    if (!emptyState.hidden && !emptyRetryBtn.hidden) {
+      if (state.sets.length === 0) {
+        void loadSetsAndStart();
+      } else {
+        void loadCurrentView(false);
+      }
     }
   });
 
@@ -899,6 +948,23 @@ function applySavedState(settings: SavedSettings, recent: RecentIcon[]): void {
   syncControlsFromState();
 }
 
+async function loadSetsAndStart(): Promise<void> {
+  hideEmpty();
+  setStatus('Loading sets...');
+  try {
+    const data = await listSets();
+    state.sets = data.sets;
+    populateSetsDropdown(data.sets);
+    renderCategories();
+    searchInput.placeholder = `Search ${data.icons.toLocaleString('en-US')} icons...`;
+    await loadCurrentView(false);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    setStatus('Failed to load sets');
+    showEmpty('Could not connect to IconMCP', message, { allowRetry: true });
+  }
+}
+
 async function init(): Promise<void> {
   bindEvents();
 
@@ -935,18 +1001,8 @@ async function init(): Promise<void> {
     });
   });
 
-  try {
-    const [data] = await Promise.all([listSets(), initPromise]);
-    state.sets = data.sets;
-    populateSetsDropdown(data.sets);
-    renderCategories();
-    searchInput.placeholder = `Search ${data.icons.toLocaleString('en-US')} icons...`;
-    await loadCurrentView(false);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    setStatus('Failed to load sets');
-    showEmpty('Could not connect to IconMCP', message);
-  }
+  await initPromise;
+  await loadSetsAndStart();
 }
 
 void init();

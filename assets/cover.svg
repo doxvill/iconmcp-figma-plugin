@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="960" viewBox="0 0 1920 960" fill="none">
+  <rect width="1920" height="960" fill="#0B0B0E"/>
+  <g opacity="0.12" stroke="#FFFFFF" stroke-width="1">
+    <path d="M0 160H1920M0 320H1920M0 480H1920M0 640H1920M0 800H1920"/>
+    <path d="M240 0V960M480 0V960M720 0V960M960 0V960M1200 0V960M1440 0V960M1680 0V960"/>
+  </g>
+  <rect x="864" y="240" width="192" height="192" rx="40" fill="#16161B" stroke="#2F6BFF" stroke-width="6"/>
+  <path d="M920 336H1000M960 296V376" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="1008" cy="288" r="12" fill="#2F6BFF"/>
+  <text x="960" y="530" text-anchor="middle" fill="#FFFFFF" font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif" font-size="76" font-weight="700" letter-spacing="-2">IconMCP for Figma</text>
+  <text x="960" y="600" text-anchor="middle" fill="#9CA3AF" font-family="Inter, -apple-system, BlinkMacSystemFont, sans-serif" font-size="34" font-weight="400">14,490+ outline &amp; duotone icons drawn by AI agents</text>
+</svg>

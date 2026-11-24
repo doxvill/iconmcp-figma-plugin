@@ -1,4 +1,5 @@
 const MCP_ENDPOINT = 'https://iconmcp.com/mcp';
+const REQUEST_TIMEOUT_MS = 12_000;
 
 export type IconStyle = 'outline' | 'duotone';
 
@@ -69,20 +70,44 @@ const svgCache = new Map<string, string>();
 let cachedSets: ListSetsResponse | null = null;
 
 async function callMcpTool<T>(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(MCP_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream',
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: rpcId++,
-      method: 'tools/call',
-      params: { name, arguments: args },
-    }),
-    signal,
-  });
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    throw new Error('You appear to be offline. Check your internet connection.');
+  }
+
+  const timeoutController = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => timeoutController.abort(), REQUEST_TIMEOUT_MS);
+
+  const onParentAbort = () => timeoutController.abort();
+  signal?.addEventListener('abort', onParentAbort, { once: true });
+
+  let res: Response;
+  try {
+    res = await fetch(MCP_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: rpcId++,
+        method: 'tools/call',
+        params: { name, arguments: args },
+      }),
+      signal: timeoutController.signal,
+    });
+  } catch (err) {
+    if (signal?.aborted) {
+      throw err;
+    }
+    if (timeoutController.signal.aborted) {
+      throw new Error('Request timed out. IconMCP did not respond in time.');
+    }
+    throw err;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+    signal?.removeEventListener('abort', onParentAbort);
+  }
 
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} ${res.statusText}`);
