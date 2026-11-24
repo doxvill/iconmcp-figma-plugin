@@ -12,13 +12,33 @@ import {
   type IconStyle,
 } from './mcp';
 
-const DEFAULT_HINT = 'Click to insert \u00b7 Right-click to copy';
+const DEFAULT_HINT = 'Click or drag \u00b7 Right-click to copy';
+const RECENT_SET_ID = '__recent__';
 const PAGE_SIZE = 60;
 const SEARCH_LIMIT = 48;
 const SVG_FETCH_CONCURRENCY = 8;
 
+interface RecentIcon {
+  name: string;
+  label: string;
+}
+
+interface SavedSettings {
+  style?: IconStyle;
+  size?: number;
+  stroke?: number;
+  radius?: number;
+  color?: string;
+  selectedSetId?: string;
+  asComponent?: boolean;
+  replaceSelected?: boolean;
+  width?: number;
+  height?: number;
+}
+
 const state = {
   sets: [] as IconSetInfo[],
+  recent: [] as RecentIcon[],
   selectedSetId: 'generic',
   selectedCategory: '',
   query: '',
@@ -26,6 +46,8 @@ const state = {
   nextOffset: null as number | null,
   totalInView: 0,
   isLoading: false,
+  asComponent: false,
+  replaceSelected: false,
   options: {
     style: 'outline' as IconStyle,
     size: 24,
@@ -60,10 +82,44 @@ const strokeVal = document.getElementById('stroke-val') as HTMLElement;
 const radiusRange = document.getElementById('radius-range') as HTMLInputElement;
 const radiusVal = document.getElementById('radius-val') as HTMLElement;
 const styleButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('.seg-btn'));
+const toggleComponentBtn = document.getElementById('toggle-component') as HTMLButtonElement;
+const toggleReplaceBtn = document.getElementById('toggle-replace') as HTMLButtonElement;
 const resizeHandle = document.getElementById('resize-handle') as HTMLDivElement;
 
 function postToPlugin(msg: unknown): void {
   parent.postMessage({ pluginMessage: msg }, '*');
+}
+
+function saveSettings(extra: Partial<SavedSettings> = {}): void {
+  postToPlugin({
+    type: 'save-settings',
+    settings: {
+      style: state.options.style,
+      size: state.options.size,
+      stroke: state.options.stroke,
+      radius: state.options.radius,
+      color: state.options.color,
+      selectedSetId: state.selectedSetId,
+      asComponent: state.asComponent,
+      replaceSelected: state.replaceSelected,
+      ...extra,
+    },
+  });
+}
+
+function syncControlsFromState(): void {
+  for (const b of styleButtons) {
+    b.classList.toggle('active', b.dataset.style === state.options.style);
+  }
+  sizeSelect.value = String(state.options.size);
+  colorPicker.value = state.options.color;
+  colorHex.value = state.options.color;
+  strokeRange.value = String(state.options.stroke);
+  strokeVal.textContent = String(state.options.stroke);
+  radiusRange.value = String(state.options.radius);
+  radiusVal.textContent = String(state.options.radius);
+  toggleComponentBtn.classList.toggle('active', state.asComponent);
+  toggleReplaceBtn.classList.toggle('active', state.replaceSelected);
 }
 
 function abortActive(): AbortController {
@@ -96,6 +152,13 @@ function populateSetsDropdown(sets: IconSetInfo[]): void {
   allOpt.textContent = 'All sets';
   setSelect.appendChild(allOpt);
 
+  if (state.recent.length > 0) {
+    const recentOpt = document.createElement('option');
+    recentOpt.value = RECENT_SET_ID;
+    recentOpt.textContent = `Recent (${state.recent.length})`;
+    setSelect.appendChild(recentOpt);
+  }
+
   const groups = new Map<string, IconSetInfo[]>();
   for (const s of sets) {
     const group = s.group || 'Other';
@@ -116,7 +179,11 @@ function populateSetsDropdown(sets: IconSetInfo[]): void {
     setSelect.appendChild(optgroup);
   }
 
-  if (sets.some((s) => s.id === state.selectedSetId)) {
+  if (
+    state.selectedSetId === RECENT_SET_ID && state.recent.length > 0 ||
+    state.selectedSetId === '' ||
+    sets.some((s) => s.id === state.selectedSetId)
+  ) {
     setSelect.value = state.selectedSetId;
   } else if (sets.length > 0) {
     state.selectedSetId = sets[0].id;
@@ -125,6 +192,20 @@ function populateSetsDropdown(sets: IconSetInfo[]): void {
 }
 
 function renderCategories(): void {
+  if (state.selectedSetId === RECENT_SET_ID && state.query.trim().length === 0) {
+    categoryBar.hidden = false;
+    categoryBar.innerHTML = '';
+    const clearRecentBtn = document.createElement('button');
+    clearRecentBtn.type = 'button';
+    clearRecentBtn.className = 'cat-pill';
+    clearRecentBtn.textContent = 'Clear recent';
+    clearRecentBtn.addEventListener('click', () => {
+      postToPlugin({ type: 'clear-recent' });
+    });
+    categoryBar.appendChild(clearRecentBtn);
+    return;
+  }
+
   const currentSet = state.sets.find((s) => s.id === state.selectedSetId);
   if (!currentSet || state.query.trim().length > 0 || currentSet.categories.length === 0) {
     categoryBar.hidden = true;
@@ -167,6 +248,13 @@ function applySvgToTile(tile: HTMLButtonElement, rawSvg: string): void {
   tile.innerHTML = normalizeSvgColor(rawSvg, state.options.color);
 }
 
+async function resolveFinalSvg(name: string): Promise<string> {
+  const rawSvg =
+    getCachedIconSvg(name, state.options) ??
+    (await getIconSvg(name, state.options));
+  return normalizeSvgColor(rawSvg, state.options.color);
+}
+
 async function copySvgToClipboard(name: string, svg: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(svg);
@@ -194,6 +282,7 @@ function createIconTile(item: IconItem): HTMLButtonElement {
   tile.className = 'icon-tile';
   tile.title = item.label ? `${item.label} (${item.name})` : item.name;
   tile.dataset.name = item.name;
+  tile.draggable = true;
 
   const svg = item.svg ?? getCachedIconSvg(item.name, state.options);
   if (svg) {
@@ -212,15 +301,15 @@ function createIconTile(item: IconItem): HTMLButtonElement {
 
   tile.addEventListener('click', async () => {
     try {
-      const rawSvg =
-        getCachedIconSvg(item.name, state.options) ??
-        (await getIconSvg(item.name, state.options));
-      const finalSvg = normalizeSvgColor(rawSvg, state.options.color);
+      const finalSvg = await resolveFinalSvg(item.name);
       postToPlugin({
         type: 'insert-icon',
         name: item.name,
+        label: item.label,
         svg: finalSvg,
         size: state.options.size,
+        asComponent: state.asComponent,
+        replaceSelected: state.replaceSelected,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -228,13 +317,49 @@ function createIconTile(item: IconItem): HTMLButtonElement {
     }
   });
 
+  tile.addEventListener('dragstart', (e) => {
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', item.name);
+    }
+  });
+
+  tile.addEventListener('dragend', async (e) => {
+    // Only trigger Figma canvas drop if released outside the plugin iframe
+    const inIframe =
+      e.clientX >= 0 &&
+      e.clientY >= 0 &&
+      e.clientX <= window.innerWidth &&
+      e.clientY <= window.innerHeight;
+    if (inIframe) return;
+
+    try {
+      const finalSvg = await resolveFinalSvg(item.name);
+      parent.postMessage(
+        {
+          pluginDrop: {
+            clientX: e.clientX,
+            clientY: e.clientY,
+            items: [{ type: 'image/svg+xml', data: finalSvg }],
+            dropMetadata: {
+              name: item.name,
+              label: item.label,
+              size: state.options.size,
+              asComponent: state.asComponent,
+            },
+          },
+        },
+        '*',
+      );
+    } catch {
+      // Ignore failed drop fetch
+    }
+  });
+
   tile.addEventListener('contextmenu', async (e) => {
     e.preventDefault();
     try {
-      const rawSvg =
-        getCachedIconSvg(item.name, state.options) ??
-        (await getIconSvg(item.name, state.options));
-      const finalSvg = normalizeSvgColor(rawSvg, state.options.color);
+      const finalSvg = await resolveFinalSvg(item.name);
       await copySvgToClipboard(item.name, finalSvg);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -260,7 +385,7 @@ function renderGrid(items: IconItem[], append = false): HTMLButtonElement[] {
   return created;
 }
 
-async function hydrateSearchSvgs(
+async function hydrateIconsSvgs(
   items: IconItem[],
   tiles: HTMLButtonElement[],
   signal: AbortSignal,
@@ -305,12 +430,11 @@ async function loadCurrentView(append = false): Promise<void> {
       loadMoreWrap.hidden = true;
       hideEmpty();
       setStatus('Searching...');
-      const res = await searchIcons(
-        query,
-        state.selectedSetId || undefined,
-        SEARCH_LIMIT,
-        signal,
-      );
+      const setFilter =
+        state.selectedSetId && state.selectedSetId !== RECENT_SET_ID
+          ? state.selectedSetId
+          : undefined;
+      const res = await searchIcons(query, setFilter, SEARCH_LIMIT, signal);
       if (signal.aborted) return;
 
       state.items = res.results.map((r) => ({
@@ -333,7 +457,27 @@ async function loadCurrentView(append = false): Promise<void> {
       setStatus(
         `${state.items.length} result${state.items.length === 1 ? '' : 's'}${res.weak ? ' (broad match)' : ''}`,
       );
-      void hydrateSearchSvgs(state.items, tiles, signal);
+      void hydrateIconsSvgs(state.items, tiles, signal);
+      return;
+    }
+
+    // Recent view
+    if (state.selectedSetId === RECENT_SET_ID) {
+      loadMoreWrap.hidden = true;
+      hideEmpty();
+      state.items = state.recent.map((r) => ({ name: r.name, label: r.label }));
+      state.nextOffset = null;
+
+      if (state.items.length === 0) {
+        iconGrid.innerHTML = '';
+        showEmpty('No recent icons', 'Icons you insert will appear here.');
+        setStatus('0 recent');
+        return;
+      }
+
+      const tiles = renderGrid(state.items, false);
+      setStatus(`${state.items.length} recent`);
+      void hydrateIconsSvgs(state.items, tiles, signal);
       return;
     }
 
@@ -395,6 +539,7 @@ async function loadCurrentView(append = false): Promise<void> {
 }
 
 function scheduleOptionsReload(): void {
+  saveSettings();
   window.clearTimeout(optionsDebounce);
   optionsDebounce = window.setTimeout(() => {
     void loadCurrentView(false);
@@ -425,6 +570,7 @@ function bindEvents(): void {
   setSelect.addEventListener('change', () => {
     state.selectedSetId = setSelect.value;
     state.selectedCategory = '';
+    saveSettings();
     renderCategories();
     void loadCurrentView(false);
   });
@@ -481,6 +627,18 @@ function bindEvents(): void {
     scheduleOptionsReload();
   });
 
+  toggleComponentBtn.addEventListener('click', () => {
+    state.asComponent = !state.asComponent;
+    toggleComponentBtn.classList.toggle('active', state.asComponent);
+    saveSettings();
+  });
+
+  toggleReplaceBtn.addEventListener('click', () => {
+    state.replaceSelected = !state.replaceSelected;
+    toggleReplaceBtn.classList.toggle('active', state.replaceSelected);
+    saveSettings();
+  });
+
   // "/" shortcut focuses search
   window.addEventListener('keydown', (e) => {
     if (e.key === '/' && document.activeElement !== searchInput && document.activeElement !== colorHex) {
@@ -493,22 +651,82 @@ function bindEvents(): void {
   resizeHandle.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     resizeHandle.setPointerCapture(e.pointerId);
+    let lastW = window.innerWidth;
+    let lastH = window.innerHeight;
+
     const onMove = (ev: PointerEvent) => {
-      postToPlugin({ type: 'resize', width: ev.clientX + 8, height: ev.clientY + 8 });
+      lastW = Math.max(300, Math.min(800, Math.round(ev.clientX + 8)));
+      lastH = Math.max(400, Math.min(900, Math.round(ev.clientY + 8)));
+      postToPlugin({ type: 'resize', width: lastW, height: lastH });
     };
     const onUp = () => {
       resizeHandle.removeEventListener('pointermove', onMove);
       resizeHandle.removeEventListener('pointerup', onUp);
+      saveSettings({ width: lastW, height: lastH });
     };
     resizeHandle.addEventListener('pointermove', onMove);
     resizeHandle.addEventListener('pointerup', onUp);
   });
 }
 
+function applySavedState(settings: SavedSettings, recent: RecentIcon[]): void {
+  state.recent = recent;
+  if (settings.style === 'outline' || settings.style === 'duotone') {
+    state.options.style = settings.style;
+  }
+  if (typeof settings.size === 'number') state.options.size = settings.size;
+  if (typeof settings.stroke === 'number') state.options.stroke = settings.stroke;
+  if (typeof settings.radius === 'number') state.options.radius = settings.radius;
+  if (typeof settings.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(settings.color)) {
+    state.options.color = settings.color;
+  }
+  if (typeof settings.selectedSetId === 'string') {
+    state.selectedSetId = settings.selectedSetId;
+  }
+  if (typeof settings.asComponent === 'boolean') state.asComponent = settings.asComponent;
+  if (typeof settings.replaceSelected === 'boolean') state.replaceSelected = settings.replaceSelected;
+
+  syncControlsFromState();
+}
+
 async function init(): Promise<void> {
   bindEvents();
+
+  let initResolved = false;
+  const initPromise = new Promise<void>((resolve) => {
+    const timer = window.setTimeout(() => {
+      if (!initResolved) {
+        initResolved = true;
+        resolve();
+      }
+    }, 300);
+
+    window.addEventListener('message', (event: MessageEvent) => {
+      const msg = event.data?.pluginMessage;
+      if (!msg) return;
+
+      if (msg.type === 'init-state') {
+        applySavedState(msg.settings ?? {}, msg.recent ?? []);
+        if (!initResolved) {
+          initResolved = true;
+          window.clearTimeout(timer);
+          resolve();
+        }
+      } else if (msg.type === 'recent-updated') {
+        state.recent = msg.recent ?? [];
+        if (state.sets.length > 0) {
+          populateSetsDropdown(state.sets);
+        }
+        if (state.selectedSetId === RECENT_SET_ID && state.query.trim().length === 0) {
+          renderCategories();
+          void loadCurrentView(false);
+        }
+      }
+    });
+  });
+
   try {
-    const data = await listSets();
+    const [data] = await Promise.all([listSets(), initPromise]);
     state.sets = data.sets;
     populateSetsDropdown(data.sets);
     renderCategories();

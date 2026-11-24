@@ -439,6 +439,53 @@ body {
   cursor: pointer;
 }
 
+.mode-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mode-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-sec);
+  color: var(--text-sec);
+  font-size: 10.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.mode-pill:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.mode-pill.active {
+  background: color-mix(in srgb, var(--bg-brand) 14%, transparent);
+  border-color: var(--bg-brand);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.mode-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-sec);
+  opacity: 0.5;
+}
+
+.mode-pill.active .mode-dot {
+  background: var(--bg-brand);
+  opacity: 1;
+}
+
 .resize-handle {
   position: absolute;
   right: 2px;
